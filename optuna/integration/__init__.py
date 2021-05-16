@@ -50,8 +50,8 @@ if TYPE_CHECKING:
     from optuna.integration.lightgbm import LightGBMPruningCallback  # NOQA
     from optuna.integration.lightgbm import LightGBMTuner  # NOQA
     from optuna.integration.lightgbm import LightGBMTunerCV  # NOQA
-    from optuna.integration.mlflow import MLFlowIntegrator  # NOQA
     from optuna.integration.mlflow import MLflowCallback  # NOQA
+    from optuna.integration.mlflow import MLFlowIntegrator  # NOQA
     from optuna.integration.mlflow import track_in_mlflow  # NOQA
     from optuna.integration.mxnet import MXNetPruningCallback  # NOQA
     from optuna.integration.pytorch_distributed import TorchDistributedTrial  # NOQA

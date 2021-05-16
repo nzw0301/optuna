@@ -1,5 +1,4 @@
 import textwrap
-from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -59,6 +58,7 @@ class MLFlowIntegrator(object):
         self._metric_name = metric_name
         self._nest_trials = nest_trials
         self._tag_study_user_attrs = tag_study_user_attrs
+        self._last_run_id = None
 
     def initialize_experiment(self, study: optuna.study.Study) -> None:
         """Initialize a MLFlow experiment with the study name.
@@ -217,8 +217,10 @@ class MLflowCallback(MLFlowIntegrator):
     def __call__(self, study: optuna.study.Study, trial: optuna.trial.FrozenTrial) -> None:
 
         self.initialize_experiment(study)
-
-        with mlflow.start_run(run_name=str(trial.number), nested=self._nest_trials):
+        print(self._last_run_id)
+        with mlflow.start_run(
+            run_id=self._last_run_id, run_name=str(trial.number), nested=self._nest_trials
+        ):
 
             # This sets the metric for MLflow.
             self.log_metric(trial.value)
@@ -229,108 +231,16 @@ class MLflowCallback(MLFlowIntegrator):
             # This sets the tags for MLflow.
             self.set_tags(trial, study)
 
+    def track_in_mlflow(self):
+        def decorator(func: ObjectiveFuncType) -> ObjectiveFuncType:
+            def wrapper(trial: optuna.trial.Trial) -> Union[float, Sequence[float]]:
+                study = trial.study
+                self.initialize_experiment(study)
 
-@experimental("2.8.0")
-def track_in_mlflow(
-    tracking_uri: Optional[str] = None,
-    metric_name: Union[str, Sequence[str]] = "value",
-    nest_trials: bool = False,
-    tag_study_user_attrs: bool = False,
-) -> Callable:
-    """Decorator for optimization function to track Optuna trials with MLflow.
+                with mlflow.start_run(run_name=str(trial.number), nested=self._nest_trials) as run:
+                    self._last_run_id = run.info.run_id
+                    return func(trial)
 
-    This decorator adds relevant information that is tracked by Optuna to MLflow
-    and it is possible to log additional information using the standard MLFlow functionalities.
+            return wrapper
 
-    The MLflow experiment will be named after the Optuna study name.
-
-    Example:
-
-        Add MLflow decorator to Optuna optimization.
-
-        .. testsetup::
-
-            import pathlib
-            import tempfile
-
-            tempdir = tempfile.mkdtemp()
-            YOUR_TRACKING_URI = pathlib.Path(tempdir).as_uri()
-
-        .. testcode::
-
-            import optuna
-            import mlflow
-            from optuna.integration.mlflow import track_in_mlflow
-
-
-            @track_in_mlflow(
-                tracking_uri=YOUR_TRACKING_URI,
-                metric_name="my metric score",
-            )
-            def objective(trial):
-                x = trial.suggest_float("x", -10, 10)
-                mlflow.log_metric("base of metric", x - 2)
-                return (x - 2) ** 2
-
-
-            study = optuna.create_study(study_name="my_study")
-            study.optimize(objective, n_trials=10)
-
-        .. testcleanup::
-
-            import shutil
-
-            shutil.rmtree(tempdir)
-
-        .. testoutput::
-            :hide:
-            :options: +NORMALIZE_WHITESPACE
-
-            INFO: 'my_study' does not exist. Creating a new experiment
-
-    Args:
-        tracking_uri:
-            The URI of the MLflow tracking server.
-
-            Please refer to `mlflow.set_tracking_uri
-            <https://www.mlflow.org/docs/latest/python_api/mlflow.html#mlflow.set_tracking_uri>`_
-            for more details.
-        metric_name:
-            Name of the metric. Since the metric itself is just a number,
-            `metric_name` can be used to give it a name. So you know later
-            if it was roc-auc or accuracy.
-        nest_trials:
-            Flag indicating whether or not trials should be logged as
-            nested runs. This is often helpful for aggregating trials
-            to a particular study, under a given experiment.
-        tag_study_user_attrs:
-            Flag indicating whether or not to add the study's user attrs
-            to the mlflow trial as tags. Please note that when this flag is
-            set, key value pairs in study.user_attrs will supersede existing tags.
-
-    Returns:
-        ObjectiveFuncType: Objective function with tracking to MLFlow enabled
-    """
-    optuna_mlflow = MLFlowIntegrator(tracking_uri, metric_name, nest_trials, tag_study_user_attrs)
-
-    def decorator(func: ObjectiveFuncType) -> ObjectiveFuncType:
-        def wrapper(trial: optuna.trial.Trial) -> Union[float, Sequence[float]]:
-            study = trial.study
-            optuna_mlflow.initialize_experiment(study)
-
-            with mlflow.start_run(run_name=str(trial.number), nested=optuna_mlflow._nest_trials):
-                result = func(trial)
-                # This sets the metric for MLflow.
-                optuna_mlflow.log_metric(result)
-
-                # This sets the params for MLflow.
-                optuna_mlflow.log_params(trial)
-
-                # This sets the tags for MLflow.
-                optuna_mlflow.set_tags(trial, study)
-
-                return result
-
-        return wrapper
-
-    return decorator
+        return decorator
