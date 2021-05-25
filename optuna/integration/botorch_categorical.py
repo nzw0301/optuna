@@ -55,15 +55,16 @@ class T(InputTransform):
         Returns:
             A `batch_shape x n x d`-dim tensor of transformed inputs.
         """
-        transformed_x = []
-        if X.shape[1] != self._dim:
+
+        if self.transform_on_train or not self.transform_on_eval:
             return X
+
+        transformed_x = []
 
         x = numpy.rint(X.numpy()).astype(int)
         for sample in x:
             transformed_sample = []
             for elem, max_index in zip(sample, self._max_indices_for_categorical):
-                elem = max(max_index, elem)
                 one_hot = numpy.zeros(max_index + 1)
                 one_hot[elem] = 1.
                 transformed_sample.append(one_hot)
