@@ -134,6 +134,7 @@ def get_extras_require() -> Dict[str, List[str]]:
         "integration": [
             # TODO(toshihikoyanase): Remove the version constraint after resolving the issue
             # https://github.com/optuna/optuna/issues/1000.
+            "catboost>=0.26",
             "chainer>=5.0.0",
             "cma",
             "lightgbm",
