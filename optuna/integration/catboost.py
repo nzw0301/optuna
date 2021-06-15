@@ -45,8 +45,6 @@ class CatBoostPruningCallback(object):
         self._trial = trial
         self._metric = metric
         self._valid_name = valid_name
-        self._pruned = False
-        self._message = ""
 
     def after_iteration(self, info: Any) -> bool:
         """Run after each iteration."""
@@ -67,12 +65,6 @@ class CatBoostPruningCallback(object):
         self._trial.report(current_score, step=epoch)
         if self._trial.should_prune():
             message = "Trial was pruned at iteration {}.".format(epoch)
-            self._message = message
-            self._pruned = True
-            return False
-        return True
+            raise optuna.TrialPruned(message)
 
-    def check_pruned(self) -> None:
-        """Check whether pruend."""
-        if self._pruned is True:
-            raise optuna.TrialPruned(self._message)
+        return True
