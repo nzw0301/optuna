@@ -8,12 +8,14 @@ from typing import Union
 import warnings
 
 import numpy
+import numpy as np
 
 from optuna import logging
 from optuna._experimental import experimental
 from optuna._imports import try_import
 from optuna._transform import _SearchSpaceTransform
 from optuna.distributions import BaseDistribution
+from optuna.distributions import CategoricalDistribution
 from optuna.samplers import BaseSampler
 from optuna.samplers import IntersectionSearchSpace
 from optuna.samplers import RandomSampler
@@ -21,7 +23,6 @@ from optuna.study import Study
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
-
 
 with try_import() as _imports:
     from botorch.acquisition.monte_carlo import qExpectedImprovement
@@ -33,7 +34,7 @@ with try_import() as _imports:
     from botorch.models import SingleTaskGP
     from botorch.models.transforms.outcome import Standardize
     from botorch.models.kernels import CategoricalKernel
-    from botorch.optim import optimize_acqf
+    from botorch.optim import optimize_acqf, optimize_acqf_discrete
     from botorch.sampling.samplers import SobolQMCNormalSampler
     from botorch.utils.multi_objective.box_decomposition import NondominatedPartitioning
     from botorch.utils.multi_objective.scalarization import get_chebyshev_scalarization
@@ -43,16 +44,16 @@ with try_import() as _imports:
     from gpytorch.mlls import ExactMarginalLogLikelihood
     import torch
 
-
 _logger = logging.get_logger(__name__)
 
 
 @experimental("2.4.0")
 def qei_candidates_func(
-    train_x: "torch.Tensor",
-    train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
-    bounds: "torch.Tensor",
+        train_x: "torch.Tensor",
+        train_obj: "torch.Tensor",
+        train_con: Optional["torch.Tensor"],
+        bounds: "torch.Tensor",
+        num_choices: int = 1024,
 ) -> "torch.Tensor":
     """Quasi MC-based batch Expected Improvement (qEI).
 
@@ -118,9 +119,11 @@ def qei_candidates_func(
 
         objective = None  # Using the default identity objective.
 
-    train_x = normalize(train_x, bounds=bounds)
-
     model = SingleTaskGP(train_x, train_y, outcome_transform=Standardize(m=train_y.size(-1)))
+    model.covar_module.base_kernel = CategoricalKernel(
+        batch_shape=model.covar_module.batch_shape,
+    )
+
     mll = ExactMarginalLogLikelihood(model.likelihood, model)
     fit_gpytorch_model(mll)
 
@@ -131,30 +134,32 @@ def qei_candidates_func(
         objective=objective,
     )
 
-    standard_bounds = torch.zeros_like(bounds)
-    standard_bounds[1] = 1
+    # standard_bounds = torch.zeros_like(bounds)
+    # standard_bounds[1] = 1
+    # num choices x d
+    # generate choice
+    choices = []
+    for high in bounds.T[:, 1].numpy().astype(int):
+        choices.append(torch.randint(high+1, (num_choices, )))
+    choices = torch.stack(choices).T
 
-    candidates, _ = optimize_acqf(
+    candidates, _ = optimize_acqf_discrete(
         acq_function=acqf,
-        bounds=standard_bounds,
+        choices=choices,
         q=1,
-        num_restarts=10,
-        raw_samples=512,
-        options={"batch_limit": 5, "maxiter": 200},
-        sequential=True,
     )
 
-    candidates = unnormalize(candidates.detach(), bounds=bounds)
-
-    return candidates
+    # candidates = unnormalize(candidates.detach(), bounds=bounds)
+    return candidates.detach()
 
 
 @experimental("2.4.0")
 def qehvi_candidates_func(
-    train_x: "torch.Tensor",
-    train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
-    bounds: "torch.Tensor",
+        train_x: "torch.Tensor",
+        train_obj: "torch.Tensor",
+        train_con: Optional["torch.Tensor"],
+        bounds: "torch.Tensor",
+        num_choices
 ) -> "torch.Tensor":
     """Quasi MC-based batch Expected Hypervolume Improvement (qEHVI).
 
@@ -237,10 +242,11 @@ def qehvi_candidates_func(
 
 @experimental("2.4.0")
 def qparego_candidates_func(
-    train_x: "torch.Tensor",
-    train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
-    bounds: "torch.Tensor",
+        train_x: "torch.Tensor",
+        train_obj: "torch.Tensor",
+        train_con: Optional["torch.Tensor"],
+        bounds: "torch.Tensor",
+        num_choices
 ) -> "torch.Tensor":
     """Quasi MC-based extended ParEGO (qParEGO) for constrained multi-objective optimization.
 
@@ -307,7 +313,7 @@ def qparego_candidates_func(
 
 
 def _get_default_candidates_func(
-    n_objectives: int,
+        n_objectives: int,
 ) -> Callable[
     [
         "torch.Tensor",
@@ -384,20 +390,21 @@ class CategoricalBoTorchSampler(BaseSampler):
     """
 
     def __init__(
-        self,
-        *,
-        candidates_func: Callable[
-            [
+            self,
+            *,
+            candidates_func: Callable[
+                [
+                    "torch.Tensor",
+                    "torch.Tensor",
+                    Optional["torch.Tensor"],
+                    "torch.Tensor",
+                ],
                 "torch.Tensor",
-                "torch.Tensor",
-                Optional["torch.Tensor"],
-                "torch.Tensor",
-            ],
-            "torch.Tensor",
-        ] = None,
-        constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
-        n_startup_trials: int = 10,
-        independent_sampler: Optional[BaseSampler] = None,
+            ] = None,
+            constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
+            n_startup_trials: int = 10,
+            independent_sampler: Optional[BaseSampler] = None,
+            num_choices: int = 1024
     ):
         _imports.check()
 
@@ -408,11 +415,12 @@ class CategoricalBoTorchSampler(BaseSampler):
 
         self._study_id: Optional[int] = None
         self._search_space = IntersectionSearchSpace()
+        self._num_choices = num_choices
 
     def infer_relative_search_space(
-        self,
-        study: Study,
-        trial: FrozenTrial,
+            self,
+            study: Study,
+            trial: FrozenTrial,
     ) -> Dict[str, BaseDistribution]:
         if self._study_id is None:
             self._study_id = study._study_id
@@ -424,10 +432,10 @@ class CategoricalBoTorchSampler(BaseSampler):
         return self._search_space.calculate(study, ordered_dict=True)  # type: ignore
 
     def sample_relative(
-        self,
-        study: Study,
-        trial: FrozenTrial,
-        search_space: Dict[str, BaseDistribution],
+            self,
+            study: Study,
+            trial: FrozenTrial,
+            search_space: Dict[str, BaseDistribution],
     ) -> Dict[str, Any]:
         assert isinstance(search_space, OrderedDict)
 
@@ -447,10 +455,13 @@ class CategoricalBoTorchSampler(BaseSampler):
         )
         params: Union[numpy.ndarray, torch.Tensor]
         con: Optional[Union[numpy.ndarray, torch.Tensor]] = None
-        bounds: Union[numpy.ndarray, torch.Tensor] = trans.bounds
-        params = numpy.empty((n_trials, trans.bounds.shape[0]), dtype=numpy.float64)
+        # bounds: Union[numpy.ndarray, torch.Tensor] = trans.bounds
+        params = numpy.empty((n_trials, len(search_space)), dtype=numpy.float64)
+
         for trial_idx, trial in enumerate(trials):
-            params[trial_idx] = trans.transform(trial.params)
+            # categorical -> one-hot -> int
+            params[trial_idx] = onehot_to_int(trans, trans.transform(trial.params))
+
             assert len(study.directions) == len(trial.values)
 
             for obj_idx, (direction, value) in enumerate(zip(study.directions, trial.values)):
@@ -487,11 +498,17 @@ class CategoricalBoTorchSampler(BaseSampler):
                     "constraints. Constraints passed to `candidates_func` will contain NaN."
                 )
 
-        values = torch.from_numpy(values)
-        params = torch.from_numpy(params)
+        values = torch.from_numpy(values).float()
+        params = torch.from_numpy(params).float()
         if con is not None:
             con = torch.from_numpy(con)
-        bounds = torch.from_numpy(bounds)
+
+        # convert bounds
+        bounds = np.zeros((len(search_space), 2))
+        for i, dist in enumerate(search_space.values()):
+            bounds[i][0] = 0.
+            bounds[i][1] = len(dist.choices) - 1
+        bounds = torch.from_numpy(bounds).float()
 
         if con is not None:
             if con.dim() == 1:
@@ -500,7 +517,7 @@ class CategoricalBoTorchSampler(BaseSampler):
 
         if self._candidates_func is None:
             self._candidates_func = _get_default_candidates_func(n_objectives=n_objectives)
-        candidates = self._candidates_func(params, values, con, bounds)
+        candidates = self._candidates_func(params, values, con, bounds, self._num_choices)
 
         if not isinstance(candidates, torch.Tensor):
             raise TypeError("Candidates must be a torch.Tensor.")
@@ -521,14 +538,14 @@ class CategoricalBoTorchSampler(BaseSampler):
                 f"{candidates.size(0)}, bounds: {bounds.size(1)}."
             )
 
-        return trans.untransform(candidates.numpy())
+        return int_to_original(trans, candidates.numpy())
 
     def sample_independent(
-        self,
-        study: Study,
-        trial: FrozenTrial,
-        param_name: str,
-        param_distribution: BaseDistribution,
+            self,
+            study: Study,
+            trial: FrozenTrial,
+            param_name: str,
+            param_distribution: BaseDistribution,
     ) -> Any:
         return self._independent_sampler.sample_independent(
             study, trial, param_name, param_distribution
@@ -538,11 +555,11 @@ class CategoricalBoTorchSampler(BaseSampler):
         self._independent_sampler.reseed_rng()
 
     def after_trial(
-        self,
-        study: Study,
-        trial: FrozenTrial,
-        state: TrialState,
-        values: Optional[Sequence[float]],
+            self,
+            study: Study,
+            trial: FrozenTrial,
+            state: TrialState,
+            values: Optional[Sequence[float]],
     ) -> None:
         if self._constraints_func is not None:
             constraints = None
@@ -565,3 +582,39 @@ class CategoricalBoTorchSampler(BaseSampler):
                     constraints,
                 )
         self._independent_sampler.after_trial(study, trial, state, values)
+
+
+def onehot_to_int(search_space: _SearchSpaceTransform, trans_params: numpy.ndarray) -> np.ndarray:
+    assert trans_params.shape == (search_space._bounds.shape[0],)
+
+    params = []
+
+    for (name, distribution), encoded_columns in zip(
+            search_space._search_space.items(), search_space.column_to_encoded_columns
+    ):
+        trans_param = trans_params[encoded_columns]
+
+        if isinstance(distribution, CategoricalDistribution):
+            # Select the highest rated one-hot encoding.
+            param = trans_param.argmax()
+
+        params.append(param)
+
+    return np.array(params)
+
+
+def int_to_original(search_space: _SearchSpaceTransform, trans_params: numpy.ndarray):
+
+        params = {}
+
+        for (name, distribution), index in zip(
+            search_space._search_space.items(), trans_params
+        ):
+            if not isinstance(distribution, CategoricalDistribution):
+                ValueError("Only CategoricalDistribution supported")
+
+            param = distribution.to_external_repr(index)
+
+            params[name] = param
+
+        return params
