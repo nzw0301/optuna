@@ -21,6 +21,7 @@ _import_structure = {
     "pytorch_lightning": ["PyTorchLightningPruningCallback"],
     "sklearn": ["OptunaSearchCV"],
     "skorch": ["SkorchPruningCallback"],
+    "mixed_botorch": ["MixedBoTorchSampler"],
     "mxnet": ["MXNetPruningCallback"],
     "skopt": ["SkoptSampler"],
     "tensorboard": ["TensorBoardCallback"],
@@ -39,8 +40,8 @@ if TYPE_CHECKING:
     from optuna.integration.allennlp import AllenNLPExecutor  # NOQA
     from optuna.integration.allennlp import AllenNLPPruningCallback  # NOQA
     from optuna.integration.botorch import BoTorchSampler  # NOQA
-    from optuna.integration.cateogrical_botorch import CategoricalBoTorchSampler  # NOQA
     from optuna.integration.catalyst import CatalystPruningCallback  # NOQA
+    from optuna.integration.cateogrical_botorch import CategoricalBoTorchSampler  # NOQA
     from optuna.integration.chainer import ChainerPruningExtension  # NOQA
     from optuna.integration.chainermn import ChainerMNStudy  # NOQA
     from optuna.integration.cma import CmaEsSampler  # NOQA
@@ -52,6 +53,7 @@ if TYPE_CHECKING:
     from optuna.integration.lightgbm import LightGBMPruningCallback  # NOQA
     from optuna.integration.lightgbm import LightGBMTuner  # NOQA
     from optuna.integration.lightgbm import LightGBMTunerCV  # NOQA
+    from optuna.integration.mixed_botorch import MixedBoTorchSampler  # NOQA
     from optuna.integration.mlflow import MLflowCallback  # NOQA
     from optuna.integration.mxnet import MXNetPruningCallback  # NOQA
     from optuna.integration.pytorch_distributed import TorchDistributedTrial  # NOQA
