@@ -38,12 +38,11 @@ parametrized_plot_edf = pytest.mark.parametrize("plot_edf", plot_functions)
 
 
 def save_static_image(figure: "go.Figure" | "Axes" | np.ndarray) -> None:
-    if plt_imports.is_successful() and isinstance(figure, (Axes, np.ndarray)):
+    if plotly_imports.is_successful() and isinstance(figure, go.Figure):
+        figure.write_image(BytesIO())
+    else:
         plt.savefig(BytesIO())
         plt.close()
-    else:
-        assert isinstance(figure, go.Figure)
-        figure.write_image(BytesIO())
 
 
 @parametrized_plot_edf
@@ -116,10 +115,10 @@ def test_plot_edf_with_target_name(plot_edf: Callable[..., Any], target_name: st
         figure = plot_edf(study, target_name=target_name)
 
     expected = target_name if target_name is not None else "Objective Value"
-    if plt_imports.is_successful() and isinstance(figure, Axes):
-        assert figure.xaxis.label.get_text() == expected
-    else:
+    if plotly_imports.is_successful() and isinstance(figure, go.figure):
         assert figure.layout.xaxis.title.text == expected
+    else:
+        assert figure.xaxis.label.get_text() == expected
 
     save_static_image(figure)
 
