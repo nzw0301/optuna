@@ -12,32 +12,38 @@ from optuna import Study
 from optuna.study import create_study
 from optuna.testing.visualization import prepare_study_with_trials
 from optuna.trial import create_trial
-from optuna.visualization import plot_edf as plotly_plot_edf
 from optuna.visualization._edf import _EDFInfo
 from optuna.visualization._edf import _get_edf_info
 from optuna.visualization._edf import NUM_SAMPLES_X_AXIS
 from optuna.visualization._plotly_imports import _imports as plotly_imports
-from optuna.visualization.matplotlib import plot_edf as plt_plot_edf
 from optuna.visualization.matplotlib._matplotlib_imports import _imports as plt_imports
 
 
+plot_functions = []
 if plotly_imports.is_successful():
+    from optuna.visualization import plot_edf as plotly_plot_edf
     from optuna.visualization._plotly_imports import go
 
+    plot_functions.append(plotly_plot_edf)
+
 if plt_imports.is_successful():
+    from optuna.visualization.matplotlib import plot_edf as plt_plot_edf
     from optuna.visualization.matplotlib._matplotlib_imports import Axes
     from optuna.visualization.matplotlib._matplotlib_imports import plt
 
+    plot_functions.append(plt_plot_edf)
 
-parametrized_plot_edf = pytest.mark.parametrize("plot_edf", [plotly_plot_edf, plt_plot_edf])
+
+parametrized_plot_edf = pytest.mark.parametrize("plot_edf", plot_functions)
 
 
-def save_static_image(figure: go.Figure | Axes | np.ndarray) -> None:
-    if isinstance(figure, go.Figure):
-        figure.write_image(BytesIO())
-    else:
+def save_static_image(figure: "go.Figure" | "Axes" | np.ndarray) -> None:
+    if plt_imports.is_successful() and isinstance(figure, (Axes, np.ndarray)):
         plt.savefig(BytesIO())
         plt.close()
+    else:
+        assert isinstance(figure, go.Figure)
+        figure.write_image(BytesIO())
 
 
 @parametrized_plot_edf
@@ -110,10 +116,10 @@ def test_plot_edf_with_target_name(plot_edf: Callable[..., Any], target_name: st
         figure = plot_edf(study, target_name=target_name)
 
     expected = target_name if target_name is not None else "Objective Value"
-    if isinstance(figure, go.Figure):
-        assert figure.layout.xaxis.title.text == expected
-    elif isinstance(figure, Axes):
+    if plt_imports.is_successful() and isinstance(figure, Axes):
         assert figure.xaxis.label.get_text() == expected
+    else:
+        assert figure.layout.xaxis.title.text == expected
 
     save_static_image(figure)
 
